@@ -1,10 +1,10 @@
-package com.garagebid.catalog_service;
+package com.garagebid.auction;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class CatalogServiceApplicationTests {
+class AuctionApplicationTests {
 
 	@Test
 	void contextLoads() {

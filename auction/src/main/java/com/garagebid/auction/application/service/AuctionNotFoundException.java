@@ -1,4 +1,9 @@
 package com.garagebid.auction.application.service;
 
-public class AuctionNotFoundException {
+import java.util.UUID;
+
+public class AuctionNotFoundException extends RuntimeException {
+    public AuctionNotFoundException(UUID id) {
+        super("Auction not found: " + id);
+    }
 }

@@ -1,4 +1,7 @@
 package com.garagebid.auction.application.port.in;
 
-public class CloseAuctionUseCase {
+import java.util.UUID;
+
+public interface CloseAuctionUseCase {
+    void closeAuction(UUID auctionId);
 }

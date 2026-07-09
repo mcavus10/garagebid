@@ -1,4 +1,7 @@
 package com.garagebid.auction.application.port.out;
 
-public class SaveAuctionPort {
+import com.garagebid.auction.domain.model.Auction;
+
+public interface SaveAuctionPort {
+    Auction save(Auction auction);
 }
