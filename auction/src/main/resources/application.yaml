@@ -18,6 +18,9 @@ spring:
   flyway:
     schemas: auction
     default-schema: auction
+  mvc:
+    problemdetails:
+      enabled: true
 
 management:
   endpoints:
