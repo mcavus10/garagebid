@@ -7,6 +7,8 @@ import com.garagebid.auction.application.port.in.OpenAuctionUseCase;
 import com.garagebid.auction.application.port.in.OpenAuctionUseCase.OpenAuctionCommand;
 import com.garagebid.auction.application.port.in.PlaceBidUseCase;
 import com.garagebid.auction.domain.model.Money;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -16,6 +18,10 @@ import java.net.URI;
 import java.util.Currency;
 import java.util.UUID;
 
+@Tag(
+        name = "Auctions",
+        description = "Auction lifecycle and bidding operations"
+)
 @RestController
 @RequestMapping("/api/v1/auctions")
 public class AuctionController {
@@ -36,6 +42,10 @@ public class AuctionController {
         this.closeAuctionUseCase = closeAuctionUseCase;
     }
 
+    @Operation(
+            summary = "Open an auction",
+            description = "Creates a new auction in OPEN status"
+    )
     @PostMapping
     public ResponseEntity<Void> openAuction(@Valid @RequestBody OpenAuctionRequest request) {
         Money startingPrice= new Money(request.startingAmount(), Currency.getInstance(request.currency()));
@@ -54,6 +64,10 @@ public class AuctionController {
         return ResponseEntity.created(location).build();
     }
 
+    @Operation(
+            summary = "Place a bid",
+            description = "Places a bid if the auction is open and the amount is valid"
+    )
     @PostMapping("/{auctionId}/bids")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void placeBid(
@@ -74,6 +88,10 @@ public class AuctionController {
         placeBidUseCase.placeBid(command);
     }
 
+    @Operation(
+            summary = "Close an auction",
+            description = "Closes an open auction"
+    )
     @PostMapping("/{auctionId}/close")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void closeAuction(@PathVariable UUID auctionId) {
