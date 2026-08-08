@@ -4,20 +4,20 @@ server:
 spring:
   application:
     name: auction
+
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/garagebid}
+    url: ${DB_URL:jdbc:postgresql://localhost:5434/auction}
     username: ${DB_USERNAME:garagebid}
     password: ${DB_PASSWORD:garagebid}
+
   jpa:
     hibernate:
       ddl-auto: validate
     open-in-view: false
-    properties:
-      hibernate:
-        default_schema: auction
+
   flyway:
-    schemas: auction
-    default-schema: auction
+    enabled: true
+
   mvc:
     problemdetails:
       enabled: true

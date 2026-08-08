@@ -1,15 +1,27 @@
 services:
-  garagebid-db:
+
+  catalog-db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: garagebid
+      POSTGRES_DB: catalog
       POSTGRES_USER: garagebid
       POSTGRES_PASSWORD: garagebid
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
-      - garagebid-db-data:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d
+      - catalog-db-data:/var/lib/postgresql/data
+
+  auction-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: auction
+      POSTGRES_USER: garagebid
+      POSTGRES_PASSWORD: garagebid
+    ports:
+      - "5434:5432"
+    volumes:
+      - auction-db-data:/var/lib/postgresql/data
 
 volumes:
-  garagebid-db-data:
+  catalog-db-data:
+  auction-db-data:

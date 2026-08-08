@@ -4,21 +4,20 @@ server:
 spring:
   application:
     name: catalog-service
+
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/garagebid}
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/catalog}
     username: ${DB_USERNAME:garagebid}
     password: ${DB_PASSWORD:garagebid}
+
   jpa:
     hibernate:
       ddl-auto: validate
     open-in-view: false
-    properties:
-      hibernate:
-        default_schema: catalog
+
   flyway:
     enabled: true
-    schemas: catalog
-    default-schema: catalog
+
   mvc:
     problemdetails:
       enabled: true
