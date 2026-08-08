@@ -22,6 +22,10 @@ spring:
     problemdetails:
       enabled: true
 
+clients:
+  catalog:
+    base-url: ${CATALOG_BASE_URL:http://localhost:8081}
+
 management:
   endpoints:
     web:

@@ -3,6 +3,7 @@ package com.garagebid.auction.application.service;
 import com.garagebid.auction.application.port.in.CloseAuctionUseCase;
 import com.garagebid.auction.application.port.in.OpenAuctionUseCase;
 import com.garagebid.auction.application.port.in.PlaceBidUseCase;
+import com.garagebid.auction.application.port.out.CarLookupPort;
 import com.garagebid.auction.application.port.out.LoadAuctionPort;
 import com.garagebid.auction.application.port.out.SaveAuctionPort;
 import com.garagebid.auction.domain.model.Auction;
@@ -18,13 +19,15 @@ public class AuctionService implements PlaceBidUseCase, CloseAuctionUseCase, Ope
 
     private final LoadAuctionPort loadAuctionPort;
     private final SaveAuctionPort saveAuctionPort;
+    private final CarLookupPort carLookupPort;
     private final Clock clock;
 
     public AuctionService(LoadAuctionPort loadAuctionPort,
-                          SaveAuctionPort saveAuctionPort,
+                          SaveAuctionPort saveAuctionPort, CarLookupPort carLookupPort,
                           Clock clock) {
         this.loadAuctionPort = loadAuctionPort;
         this.saveAuctionPort = saveAuctionPort;
+        this.carLookupPort = carLookupPort;
         this.clock = clock;
     }
 
@@ -51,8 +54,11 @@ public class AuctionService implements PlaceBidUseCase, CloseAuctionUseCase, Ope
     }
 
     @Override
-    @Transactional
     public UUID openAuction(OpenAuctionCommand command) {
+
+        if (!carLookupPort.existsById(command.carId())) {
+            throw new CarNotFoundException(command.carId());
+        }
         Auction auction = Auction.open(
                 command.carId(),
                 command.sellerId(),
