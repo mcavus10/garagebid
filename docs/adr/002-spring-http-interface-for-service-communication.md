@@ -2,13 +2,19 @@
 
 ## Status
 
-Accepted.
+Superseded by [ADR-003 — Use OpenFeign for Discovered Synchronous HTTP Clients](./003-openfeign-for-discovered-synchronous-clients.md).
 
 ---
 
 ## Date
 
 2026-08-08
+
+---
+
+## Superseded
+
+2026-08-28
 
 ---
 
@@ -40,21 +46,21 @@ auction-service
 → catalog-service
 ```
 
-The project uses:
+At the time this decision was made, the project used:
 
 - Java 21
 - Spring Boot 4.1
 - Spring Framework 7
 
-Spring Cloud compatibility with the newest Spring Boot generation may evolve independently from Spring Framework.
+Spring Cloud was not yet required by the architecture.
 
-The project therefore wants to avoid introducing unnecessary Spring Cloud coupling during this phase.
+Introducing Spring Cloud only to obtain a declarative HTTP client would have added an unnecessary platform dependency.
 
 ---
 
 # Decision
 
-GarageBid will use Spring HTTP Interfaces with:
+GarageBid will initially use Spring HTTP Interfaces with:
 
 ```text
 @HttpExchange
@@ -68,7 +74,7 @@ RestClient
 
 for synchronous service-to-service HTTP communication.
 
-The catalog contract is represented by an interface similar to:
+The catalog contract is represented by:
 
 ```text
 CatalogHttpClient
@@ -92,7 +98,7 @@ RestClient
 
 The integration is deliberately separated into two contracts.
 
-## Application-facing contract
+## Application-Facing Contract
 
 ```text
 CarLookupPort
@@ -106,7 +112,7 @@ It contains no HTTP details.
 
 ---
 
-## Technology-facing contract
+## Technology-Facing Contract
 
 ```text
 CatalogHttpClient
@@ -118,6 +124,7 @@ Conceptually:
 
 ```text
 @HttpExchange("/api/v1/cars")
+
 GET /{carId}
 ```
 
@@ -210,23 +217,21 @@ The adapter can focus on semantic translation while the HTTP interface describes
 
 ---
 
-# Why Not OpenFeign?
+# Why OpenFeign Was Initially Deferred
 
-OpenFeign is a valid declarative HTTP client and is widely used in Spring-based microservices.
+OpenFeign was considered a valid declarative HTTP client.
 
-It was not rejected as a technology.
-
-It was deliberately not selected for the current phase.
+It was deliberately not selected at this stage.
 
 Reasons:
 
-1. GarageBid uses Spring Boot 4 and Spring Framework 7.
+1. GarageBid used Spring Boot 4 and Spring Framework 7.
 2. Spring HTTP Interfaces are part of Spring Framework itself.
-3. The project does not currently require Spring Cloud features for this client.
-4. Avoiding an unnecessary dependency reduces compatibility risk.
-5. `@HttpExchange` integrates naturally with the hexagonal outbound adapter.
+3. The project did not yet require Spring Cloud.
+4. Avoiding an unnecessary dependency reduced compatibility risk.
+5. `@HttpExchange` integrated naturally with the hexagonal outbound adapter.
 
-OpenFeign may be reconsidered later if Spring Cloud becomes necessary for platform-level features.
+OpenFeign was explicitly left as a future option if Spring Cloud later became a platform dependency.
 
 ---
 
@@ -248,7 +253,7 @@ The auction application should not reason directly in those terms.
 
 The outbound adapter translates remote HTTP behavior into local application semantics.
 
-Current mapping:
+Original mapping:
 
 ```text
 Catalog 2xx
@@ -301,7 +306,7 @@ catalog unavailable
 car does not exist
 ```
 
-Only an actual catalog:
+Only an actual:
 
 ```text
 404 Not Found
@@ -319,7 +324,7 @@ Unexpected remote failures are translated into:
 CatalogUnavailableException
 ```
 
-The web adapter later maps that application failure to:
+The web adapter later maps that failure to:
 
 ```text
 503 Service Unavailable
@@ -338,7 +343,7 @@ catch any exception
     return false
 ```
 
-If catalog-service is down, the auction service would incorrectly conclude:
+If catalog-service is unavailable, auction-service would incorrectly conclude:
 
 > The car does not exist.
 
@@ -348,9 +353,9 @@ The chosen design keeps those cases separate.
 
 ---
 
-# Configuration
+# Original Configuration Model
 
-The catalog base URL is externalized.
+The catalog base URL was externalized.
 
 Example:
 
@@ -364,23 +369,15 @@ Local default:
 http://localhost:8081
 ```
 
-A deployment environment may override it.
+A deployment environment could override it.
 
-For example:
-
-```text
-http://catalog-service:8081
-```
-
-Application code does not change.
-
-This follows configuration-externalization principles.
+This followed configuration-externalization principles, but the caller still depended on a physical service location.
 
 ---
 
 # Synchronous Communication Trade-Off
 
-The current design introduces temporal coupling.
+The design introduces temporal coupling.
 
 To open an auction:
 
@@ -396,21 +393,21 @@ catalog-service
 
 to be available at that moment.
 
-### Advantages
+## Advantages
 
 - simple implementation,
 - immediate validation,
 - straightforward mental model,
 - useful introduction to distributed communication.
 
-### Disadvantages
+## Disadvantages
 
 - auction availability depends on catalog availability,
 - remote latency affects auction latency,
 - remote failures propagate into the request,
 - cascading failure becomes possible.
 
-These trade-offs are intentional.
+These trade-offs remain true after ADR-003.
 
 ---
 
@@ -445,11 +442,18 @@ This would create compile-time coupling and destroy service independence.
 
 ## OpenFeign
 
-### Decision
+### Original Decision
 
 Deferred.
 
-It remains a valid alternative but introduces Spring Cloud dependencies that are not currently required.
+At the time, Spring Cloud was not required by the project.
+
+This alternative was later selected in ADR-003 after the platform architecture introduced Spring Cloud for:
+
+- Consul,
+- service discovery,
+- client-side load balancing,
+- API Gateway.
 
 ---
 
@@ -466,7 +470,7 @@ Catalog could publish events and auction-service could maintain a local projecti
 ### Disadvantages
 
 - eventual consistency,
-- Kafka/event infrastructure,
+- event infrastructure,
 - duplicated read data,
 - more operational complexity.
 
@@ -474,15 +478,15 @@ Catalog could publish events and auction-service could maintain a local projecti
 
 Deferred.
 
-This pattern may be introduced in a later event-driven phase.
+This remains relevant for future event-driven phases.
 
 ---
 
 # Timeout and Resilience
 
-The first implementation intentionally does not attempt to solve all resilience concerns.
+The first implementation intentionally did not attempt to solve all resilience concerns.
 
-The project wants to observe raw distributed failure behavior before hiding it behind resilience mechanisms.
+The project wanted to observe raw distributed failure behavior before hiding it behind resilience mechanisms.
 
 Future phases will introduce:
 
@@ -494,39 +498,68 @@ Future phases will introduce:
 - bulkhead,
 - fallback.
 
-Those concerns belong to the dedicated resilience phase.
+Those concerns remain deferred to the dedicated resilience phase.
 
 ---
 
-# Consequences
+# Consequences of the Original Decision
 
 ## Positive
 
-- no Spring Cloud dependency required,
+- no Spring Cloud dependency was required,
 - declarative HTTP contract,
 - clean hexagonal integration,
-- application remains HTTP-independent,
-- remote semantics are translated explicitly,
-- configuration remains externalized.
+- application remained HTTP-independent,
+- remote semantics were translated explicitly,
+- configuration was externalized.
 
 ## Negative
 
-- synchronous temporal coupling,
-- generated proxy adds runtime indirection,
-- network failures are now part of the auction use case,
-- service availability becomes interdependent.
+- physical service location still had to be configured,
+- synchronous temporal coupling remained,
+- generated proxy added runtime indirection,
+- network failures became part of the auction use case,
+- service availability became interdependent.
 
 ---
 
-# Reconsideration Criteria
+# Reason for Supersession
 
-This decision may be reconsidered if:
+The original decision was valid under its original context.
 
-- Spring Cloud becomes a core platform dependency,
-- OpenFeign provides required capabilities not available through HTTP Interfaces,
-- communication moves from REST to gRPC,
-- auction-service adopts an asynchronous local catalog projection,
-- platform architecture standardizes another HTTP client.
+During Phase 03, the context changed.
+
+GarageBid introduced Spring Cloud as a platform dependency for:
+
+```text
+Consul Service Discovery
+Spring Cloud LoadBalancer
+Spring Cloud Gateway
+Consul Config
+```
+
+The original reason for avoiding Spring Cloud therefore no longer applied.
+
+The system also moved from:
+
+```text
+physical service URL
+```
+
+to:
+
+```text
+logical service identity
+```
+
+and required first-class integration with:
+
+```text
+service discovery
+client-side load balancing
+```
+
+OpenFeign became a better fit for the new platform context.
 
 The application-facing contract:
 
@@ -534,4 +567,37 @@ The application-facing contract:
 CarLookupPort
 ```
 
-should remain stable whenever possible, even if the transport implementation changes.
+remained unchanged.
+
+This demonstrated that the hexagonal boundary successfully isolated the application core from the HTTP client technology.
+
+---
+
+# Superseding Decision
+
+See:
+
+```text
+ADR-003 — Use OpenFeign for Discovered Synchronous HTTP Clients
+```
+
+The superseding decision changes the infrastructure implementation from:
+
+```text
+@HttpExchange + RestClient
+```
+
+to:
+
+```text
+OpenFeign + Spring Cloud LoadBalancer + Consul
+```
+
+while preserving:
+
+```text
+AuctionService
+CarLookupPort
+CatalogHttpAdapter boundary
+domain model
+```
