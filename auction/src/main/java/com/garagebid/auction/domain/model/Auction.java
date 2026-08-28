@@ -1,6 +1,11 @@
 package com.garagebid.auction.domain.model;
 
+import com.garagebid.auction.domain.event.AuctionOpenedEvent;
+import com.garagebid.auction.domain.event.DomainEvent;
+
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 public class Auction {
@@ -14,6 +19,8 @@ public class Auction {
     private AuctionStatus status;
     private Bid highestBid;
 
+    private final List<DomainEvent> domainEvents = new ArrayList<>();
+
     private Auction(UUID id, UUID carId, UUID sellerId, Money startingPrice,
                     Instant endsAt, AuctionStatus status, Bid highestBid) {
         this.id = id;
@@ -25,13 +32,48 @@ public class Auction {
         this.highestBid = highestBid;
     }
 
-    public static Auction open(UUID carId, UUID sellerId, Money startingPrice, Instant endsAt) {
-        if (carId == null) throw new IllegalArgumentException("carId required");
-        if (sellerId == null) throw new IllegalArgumentException("sellerId required");
-        if (startingPrice == null) throw new IllegalArgumentException("startingPrice required");
-        if (endsAt == null) throw new IllegalArgumentException("endsAt required");
-        return new Auction(UUID.randomUUID(), carId, sellerId, startingPrice,
-                endsAt, AuctionStatus.OPEN, null);
+    public static Auction open(
+            UUID carId,
+            UUID sellerId,
+            Money startingPrice,
+            Instant endsAt,
+            Instant now
+    ) {
+        UUID auctionId = UUID.randomUUID();
+
+        Auction auction = new Auction(
+                auctionId,
+                carId,
+                sellerId,
+                startingPrice,
+                endsAt,
+                AuctionStatus.OPEN,
+                null
+        );
+
+        auction.registerEvent(
+                new AuctionOpenedEvent(
+                        auctionId,
+                        carId,
+                        sellerId,
+                        startingPrice,
+                        endsAt,
+                        now
+
+                )
+        );
+
+        return auction;
+    }
+
+    private void registerEvent(DomainEvent event) {
+        domainEvents.add(event);
+    }
+
+    public List<DomainEvent> pullDomainEvents() {
+        List<DomainEvent> events = List.copyOf(domainEvents);
+        domainEvents.clear();
+        return events;
     }
 
     public static Auction rehydrate(UUID id, UUID carId, UUID sellerId, Money startingPrice,

@@ -20,14 +20,16 @@ public class AuctionService implements PlaceBidUseCase, CloseAuctionUseCase, Ope
     private final LoadAuctionPort loadAuctionPort;
     private final SaveAuctionPort saveAuctionPort;
     private final CarLookupPort carLookupPort;
+    private final AuctionTransactionalWriter transactionalWriter;
     private final Clock clock;
 
     public AuctionService(LoadAuctionPort loadAuctionPort,
-                          SaveAuctionPort saveAuctionPort, CarLookupPort carLookupPort,
+                          SaveAuctionPort saveAuctionPort, CarLookupPort carLookupPort, AuctionTransactionalWriter transactionalWriter,
                           Clock clock) {
         this.loadAuctionPort = loadAuctionPort;
         this.saveAuctionPort = saveAuctionPort;
         this.carLookupPort = carLookupPort;
+        this.transactionalWriter = transactionalWriter;
         this.clock = clock;
     }
 
@@ -56,16 +58,22 @@ public class AuctionService implements PlaceBidUseCase, CloseAuctionUseCase, Ope
     @Override
     public UUID openAuction(OpenAuctionCommand command) {
 
-        if (!carLookupPort.existsById(command.carId())) {
+        boolean carExists = carLookupPort.existsById(command.carId());
+
+        if (!carExists) {
             throw new CarNotFoundException(command.carId());
         }
+
         Auction auction = Auction.open(
                 command.carId(),
                 command.sellerId(),
                 command.startingPrice(),
-                command.endsAt()
+                command.endsAt(),
+                clock.instant()
         );
 
-        return saveAuctionPort.save(auction).id();
+        transactionalWriter.save(auction);
+
+        return auction.id();
     }
 }

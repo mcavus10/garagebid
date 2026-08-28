@@ -1,10 +1,14 @@
 package com.garagebid.auction.application.service;
 
+import com.garagebid.auction.application.event.AuctionEventMapper;
+import com.garagebid.auction.application.event.AuctionOpenedIntegrationEvent;
+import com.garagebid.auction.application.event.IntegrationEvent;
 import com.garagebid.auction.application.port.in.OpenAuctionUseCase.OpenAuctionCommand;
 import com.garagebid.auction.application.port.in.PlaceBidUseCase.PlaceBidCommand;
 import com.garagebid.auction.application.port.out.CarLookupPort;
 import com.garagebid.auction.application.port.out.LoadAuctionPort;
 import com.garagebid.auction.application.port.out.SaveAuctionPort;
+import com.garagebid.auction.application.port.out.SaveIntegrationEventPort;
 import com.garagebid.auction.domain.model.Auction;
 import com.garagebid.auction.domain.model.AuctionStatus;
 import com.garagebid.auction.domain.model.Money;
@@ -13,7 +17,9 @@ import org.junit.jupiter.api.Test;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -24,6 +30,9 @@ class AuctionServiceTest {
 
     private static final Instant NOW =
             Instant.parse("2026-08-08T12:00:00Z");
+
+    private static final Instant ENDS_AT =
+            Instant.parse("2026-08-20T18:00:00Z");
 
     private static final Clock CLOCK =
             Clock.fixed(NOW, ZoneOffset.UTC);
@@ -37,24 +46,32 @@ class AuctionServiceTest {
     private static final UUID BIDDER_ID =
             UUID.fromString("33333333-3333-3333-3333-333333333333");
 
+    private static final UUID EXISTING_AUCTION_ID =
+            UUID.fromString("44444444-4444-4444-4444-444444444444");
+
+
     @Test
     void shouldOpenAuctionWhenCarExists() {
         FakeLoadAuctionPort loadPort = new FakeLoadAuctionPort();
         FakeSaveAuctionPort savePort = new FakeSaveAuctionPort();
-        FakeCarLookupPort carLookupPort = new FakeCarLookupPort(true);
+        FakeSaveIntegrationEventPort eventPort =
+                new FakeSaveIntegrationEventPort();
 
-        AuctionService service = new AuctionService(
+        FakeCarLookupPort carLookupPort =
+                new FakeCarLookupPort(true);
+
+        AuctionService service = createService(
                 loadPort,
                 savePort,
-                carLookupPort,
-                CLOCK
+                eventPort,
+                carLookupPort
         );
 
         OpenAuctionCommand command = new OpenAuctionCommand(
                 CAR_ID,
                 SELLER_ID,
                 Money.of("395000.00", "USD"),
-                Instant.parse("2026-08-20T18:00:00Z")
+                ENDS_AT
         );
 
         UUID auctionId = service.openAuction(command);
@@ -67,31 +84,75 @@ class AuctionServiceTest {
         assertEquals(auctionId, savedAuction.id());
         assertEquals(CAR_ID, savedAuction.carId());
         assertEquals(SELLER_ID, savedAuction.sellerId());
-        assertEquals(Money.of("395000.00", "USD"), savedAuction.startingPrice());
+        assertEquals(
+                Money.of("395000.00", "USD"),
+                savedAuction.startingPrice()
+        );
         assertEquals(AuctionStatus.OPEN, savedAuction.status());
         assertNull(savedAuction.highestBid());
 
         assertEquals(1, savePort.saveCount);
+
+        assertEquals(1, eventPort.events.size());
+
+        IntegrationEvent integrationEvent =
+                eventPort.events.getFirst();
+
+        assertInstanceOf(
+                AuctionOpenedIntegrationEvent.class,
+                integrationEvent
+        );
+
+        AuctionOpenedIntegrationEvent event =
+                (AuctionOpenedIntegrationEvent) integrationEvent;
+
+        assertNotNull(event.eventId());
+        assertEquals(auctionId, event.aggregateId());
+
+        assertEquals(NOW, event.occurredAt());
+
+        assertEquals(CAR_ID, event.carId());
+        assertEquals(SELLER_ID, event.sellerId());
+        assertEquals(
+                Money.of("395000.00", "USD").amount(),
+                event.startingAmount()
+        );
+        assertEquals("USD", event.currency());
+        assertEquals(ENDS_AT, event.endsAt());
+
+        assertEquals(
+                AuctionOpenedIntegrationEvent.TYPE,
+                event.eventType()
+        );
+
+        assertEquals(
+                AuctionOpenedIntegrationEvent.VERSION,
+                event.eventVersion()
+        );
     }
 
     @Test
     void shouldRejectOpeningAuctionWhenCarDoesNotExist() {
         FakeLoadAuctionPort loadPort = new FakeLoadAuctionPort();
         FakeSaveAuctionPort savePort = new FakeSaveAuctionPort();
-        FakeCarLookupPort carLookupPort = new FakeCarLookupPort(false);
+        FakeSaveIntegrationEventPort eventPort =
+                new FakeSaveIntegrationEventPort();
 
-        AuctionService service = new AuctionService(
+        FakeCarLookupPort carLookupPort =
+                new FakeCarLookupPort(false);
+
+        AuctionService service = createService(
                 loadPort,
                 savePort,
-                carLookupPort,
-                CLOCK
+                eventPort,
+                carLookupPort
         );
 
         OpenAuctionCommand command = new OpenAuctionCommand(
                 CAR_ID,
                 SELLER_ID,
                 Money.of("395000.00", "USD"),
-                Instant.parse("2026-08-20T18:00:00Z")
+                ENDS_AT
         );
 
         CarNotFoundException exception = assertThrows(
@@ -106,12 +167,16 @@ class AuctionServiceTest {
 
         assertEquals(0, savePort.saveCount);
         assertNull(savePort.lastSaved);
+
+        assertTrue(eventPort.events.isEmpty());
     }
 
     @Test
     void shouldPropagateCatalogUnavailableWhenCarCannotBeVerified() {
         FakeLoadAuctionPort loadPort = new FakeLoadAuctionPort();
         FakeSaveAuctionPort savePort = new FakeSaveAuctionPort();
+        FakeSaveIntegrationEventPort eventPort =
+                new FakeSaveIntegrationEventPort();
 
         CarLookupPort carLookupPort = carId -> {
             throw new CatalogUnavailableException(
@@ -119,18 +184,18 @@ class AuctionServiceTest {
             );
         };
 
-        AuctionService service = new AuctionService(
+        AuctionService service = createService(
                 loadPort,
                 savePort,
-                carLookupPort,
-                CLOCK
+                eventPort,
+                carLookupPort
         );
 
         OpenAuctionCommand command = new OpenAuctionCommand(
                 CAR_ID,
                 SELLER_ID,
                 Money.of("395000.00", "USD"),
-                Instant.parse("2026-08-20T18:00:00Z")
+                ENDS_AT
         );
 
         CatalogUnavailableException exception = assertThrows(
@@ -145,28 +210,29 @@ class AuctionServiceTest {
 
         assertEquals(0, savePort.saveCount);
         assertNull(savePort.lastSaved);
+
+        assertTrue(eventPort.events.isEmpty());
     }
 
     @Test
     void shouldPlaceBidOnExistingAuction() {
         FakeLoadAuctionPort loadPort = new FakeLoadAuctionPort();
         FakeSaveAuctionPort savePort = new FakeSaveAuctionPort();
-        FakeCarLookupPort carLookupPort = new FakeCarLookupPort(true);
+        FakeSaveIntegrationEventPort eventPort =
+                new FakeSaveIntegrationEventPort();
 
-        Auction auction = Auction.open(
-                CAR_ID,
-                SELLER_ID,
-                Money.of("395000.00", "USD"),
-                Instant.parse("2026-08-20T18:00:00Z")
-        );
+        FakeCarLookupPort carLookupPort =
+                new FakeCarLookupPort(true);
+
+        Auction auction = existingOpenAuction();
 
         loadPort.add(auction);
 
-        AuctionService service = new AuctionService(
+        AuctionService service = createService(
                 loadPort,
                 savePort,
-                carLookupPort,
-                CLOCK
+                eventPort,
+                carLookupPort
         );
 
         PlaceBidCommand command = new PlaceBidCommand(
@@ -198,23 +264,32 @@ class AuctionServiceTest {
         );
 
         assertEquals(1, savePort.saveCount);
+
+
+        assertTrue(eventPort.events.isEmpty());
     }
 
     @Test
     void shouldThrowWhenPlacingBidOnUnknownAuction() {
         FakeLoadAuctionPort loadPort = new FakeLoadAuctionPort();
         FakeSaveAuctionPort savePort = new FakeSaveAuctionPort();
-        FakeCarLookupPort carLookupPort = new FakeCarLookupPort(true);
+        FakeSaveIntegrationEventPort eventPort =
+                new FakeSaveIntegrationEventPort();
 
-        AuctionService service = new AuctionService(
+        FakeCarLookupPort carLookupPort =
+                new FakeCarLookupPort(true);
+
+        AuctionService service = createService(
                 loadPort,
                 savePort,
-                carLookupPort,
-                CLOCK
+                eventPort,
+                carLookupPort
         );
 
         UUID unknownAuctionId =
-                UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+                UUID.fromString(
+                        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+                );
 
         PlaceBidCommand command = new PlaceBidCommand(
                 unknownAuctionId,
@@ -233,28 +308,28 @@ class AuctionServiceTest {
         );
 
         assertEquals(0, savePort.saveCount);
+        assertTrue(eventPort.events.isEmpty());
     }
 
     @Test
     void shouldCloseExistingAuction() {
         FakeLoadAuctionPort loadPort = new FakeLoadAuctionPort();
         FakeSaveAuctionPort savePort = new FakeSaveAuctionPort();
-        FakeCarLookupPort carLookupPort = new FakeCarLookupPort(true);
+        FakeSaveIntegrationEventPort eventPort =
+                new FakeSaveIntegrationEventPort();
 
-        Auction auction = Auction.open(
-                CAR_ID,
-                SELLER_ID,
-                Money.of("395000.00", "USD"),
-                Instant.parse("2026-08-20T18:00:00Z")
-        );
+        FakeCarLookupPort carLookupPort =
+                new FakeCarLookupPort(true);
+
+        Auction auction = existingOpenAuction();
 
         loadPort.add(auction);
 
-        AuctionService service = new AuctionService(
+        AuctionService service = createService(
                 loadPort,
                 savePort,
-                carLookupPort,
-                CLOCK
+                eventPort,
+                carLookupPort
         );
 
         service.closeAuction(auction.id());
@@ -262,25 +337,37 @@ class AuctionServiceTest {
         Auction savedAuction = savePort.lastSaved;
 
         assertNotNull(savedAuction);
-        assertEquals(AuctionStatus.CLOSED, savedAuction.status());
+        assertEquals(
+                AuctionStatus.CLOSED,
+                savedAuction.status()
+        );
+
         assertEquals(1, savePort.saveCount);
+
+        assertTrue(eventPort.events.isEmpty());
     }
 
     @Test
     void shouldThrowWhenClosingUnknownAuction() {
         FakeLoadAuctionPort loadPort = new FakeLoadAuctionPort();
         FakeSaveAuctionPort savePort = new FakeSaveAuctionPort();
-        FakeCarLookupPort carLookupPort = new FakeCarLookupPort(true);
+        FakeSaveIntegrationEventPort eventPort =
+                new FakeSaveIntegrationEventPort();
 
-        AuctionService service = new AuctionService(
+        FakeCarLookupPort carLookupPort =
+                new FakeCarLookupPort(true);
+
+        AuctionService service = createService(
                 loadPort,
                 savePort,
-                carLookupPort,
-                CLOCK
+                eventPort,
+                carLookupPort
         );
 
         UUID unknownAuctionId =
-                UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+                UUID.fromString(
+                        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+                );
 
         AuctionNotFoundException exception = assertThrows(
                 AuctionNotFoundException.class,
@@ -293,23 +380,69 @@ class AuctionServiceTest {
         );
 
         assertEquals(0, savePort.saveCount);
+        assertTrue(eventPort.events.isEmpty());
     }
 
-    private static class FakeLoadAuctionPort implements LoadAuctionPort {
+    private static Auction existingOpenAuction() {
+        return Auction.rehydrate(
+                EXISTING_AUCTION_ID,
+                CAR_ID,
+                SELLER_ID,
+                Money.of("395000.00", "USD"),
+                ENDS_AT,
+                AuctionStatus.OPEN,
+                null
+        );
+    }
 
-        private final Map<UUID, Auction> auctions = new HashMap<>();
+    private static AuctionService createService(
+            FakeLoadAuctionPort loadPort,
+            FakeSaveAuctionPort savePort,
+            FakeSaveIntegrationEventPort eventPort,
+            CarLookupPort carLookupPort
+    ) {
+        AuctionEventMapper eventMapper =
+                new AuctionEventMapper();
+
+        AuctionTransactionalWriter transactionalWriter =
+                new AuctionTransactionalWriter(
+                        savePort,
+                        eventPort,
+                        eventMapper
+                );
+
+        return new AuctionService(
+                loadPort,
+                savePort,
+                carLookupPort,
+                transactionalWriter,
+                CLOCK
+        );
+    }
+
+    private static class FakeLoadAuctionPort
+            implements LoadAuctionPort {
+
+        private final Map<UUID, Auction> auctions =
+                new HashMap<>();
 
         void add(Auction auction) {
-            auctions.put(auction.id(), auction);
+            auctions.put(
+                    auction.id(),
+                    auction
+            );
         }
 
         @Override
         public Optional<Auction> loadById(UUID auctionId) {
-            return Optional.ofNullable(auctions.get(auctionId));
+            return Optional.ofNullable(
+                    auctions.get(auctionId)
+            );
         }
     }
 
-    private static class FakeSaveAuctionPort implements SaveAuctionPort {
+    private static class FakeSaveAuctionPort
+            implements SaveAuctionPort {
 
         private Auction lastSaved;
         private int saveCount;
@@ -318,11 +451,25 @@ class AuctionServiceTest {
         public Auction save(Auction auction) {
             this.lastSaved = auction;
             this.saveCount++;
+
             return auction;
         }
     }
 
-    private static class FakeCarLookupPort implements CarLookupPort {
+    private static class FakeSaveIntegrationEventPort
+            implements SaveIntegrationEventPort {
+
+        private final List<IntegrationEvent> events =
+                new ArrayList<>();
+
+        @Override
+        public void save(IntegrationEvent event) {
+            events.add(event);
+        }
+    }
+
+    private static class FakeCarLookupPort
+            implements CarLookupPort {
 
         private final boolean exists;
 
