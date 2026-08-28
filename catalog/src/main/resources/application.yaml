@@ -5,6 +5,17 @@ spring:
   application:
     name: catalog-service
 
+  cloud:
+    consul:
+      host: localhost
+      port: 8500
+      discovery:
+        prefer-ip-address: true
+        ip-address: 127.0.0.1
+        instance-id: ${spring.application.name}-${server.port}
+        health-check-url: http://host.docker.internal:${server.port}/actuator/health
+        query-passing: true
+
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5433/catalog}
     username: ${DB_USERNAME:garagebid}

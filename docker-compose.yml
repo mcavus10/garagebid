@@ -22,6 +22,13 @@ services:
     volumes:
       - auction-db-data:/var/lib/postgresql/data
 
+  consul:
+    image: hashicorp/consul:2.0.2
+    command: agent -dev -client=0.0.0.0 -ui
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+
 volumes:
   catalog-db-data:
   auction-db-data:

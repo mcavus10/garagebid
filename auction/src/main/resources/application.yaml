@@ -5,6 +5,17 @@ spring:
   application:
     name: auction
 
+  cloud:
+    consul:
+      host: localhost
+      port: 8500
+      discovery:
+        prefer-ip-address: true
+        ip-address: 127.0.0.1
+        instance-id: ${spring.application.name}-${server.port}
+        health-check-url: http://host.docker.internal:${server.port}/actuator/health
+        query-passing: true
+
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5434/auction}
     username: ${DB_USERNAME:garagebid}
@@ -21,10 +32,6 @@ spring:
   mvc:
     problemdetails:
       enabled: true
-
-clients:
-  catalog:
-    base-url: ${CATALOG_BASE_URL:http://localhost:8081}
 
 management:
   endpoints:
