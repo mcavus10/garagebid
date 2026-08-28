@@ -84,8 +84,13 @@ garagebid/
 │   ├── pom.xml
 │   └── src/
 │
+├── gateway/
+│   ├── pom.xml
+│   └── src/
+│
 ├── docs/
-│   └── architecture/
+│   ├── adr/
+│   └── phases/
 │
 ├── docker-compose.yml
 ├── PATTERNS.md
@@ -98,64 +103,141 @@ This structure keeps the convenience of a monorepo while preserving service inde
 
 # Current Architecture
 
-GarageBid currently contains two services.
+GarageBid currently contains three Spring Boot applications and Consul as platform infrastructure.
 
 ```text
-                         ┌───────────────────────┐
-                         │       Client          │
-                         │ Postman / Frontend    │
-                         └───────────┬───────────┘
-                                     │
-                                     │ HTTP
-                                     ▼
-                         ┌───────────────────────┐
-                         │   auction-service     │
-                         │       :8082           │
-                         │                       │
-                         │ Hexagonal Architecture│
-                         └───────┬───────────────┘
-                                 │
-                    HTTP         │
-                 @HttpExchange   │
-                                 ▼
-                         ┌───────────────────────┐
-                         │   catalog-service     │
-                         │       :8081           │
-                         │                       │
-                         │ Layered Architecture  │
-                         └───────────┬───────────┘
-                                     │
-                                     ▼
-                              catalog-db
-                                :5433
+                         Client
+                           |
+                           v
+                    Gateway :8080
+                     /         \
+                    /           \
+                   v             v
+         catalog-service       auction
+          /         \            :8082
+      :8081         :8091          |
+                                   |
+                                   | OpenFeign
+                                   | +
+                                   | LoadBalancer
+                                   v
+                            catalog-service
 
 
-auction-service
-      │
-      ▼
- auction-db
-   :5434
+                    ┌───────────────────┐
+                    │      Consul       │
+                    │       :8500       │
+                    │                   │
+                    │ Registry          │
+                    │ Discovery         │
+                    │ Health Checks     │
+                    │ Configuration KV  │
+                    └───────────────────┘
 ```
 
-Each service owns its own PostgreSQL database.
+External clients communicate through:
+
+```text
+gateway :8080
+```
+
+Internal synchronous service communication uses logical service identities instead of hard-coded physical URLs.
+
+For example:
+
+```text
+auction
+→ catalog-service
+```
+
+Spring Cloud LoadBalancer resolves healthy Catalog instances through Consul.
+
+Each business service continues to own its own PostgreSQL database:
 
 ```text
 catalog-service
-    └── catalog-db
-        └── public.cars
+    ↓
+catalog-db
+    ↓
+public.cars
 
-auction-service
-    └── auction-db
-        └── public.auctions
+auction
+    ↓
+auction-db
+    ↓
+public.auctions
 ```
 
 Direct cross-service database access is not allowed.
 
-If the auction service needs information owned by the catalog service, it must communicate through the catalog service API.
+Consul is platform infrastructure and does not proxy business traffic.
 
 ---
 
 # Services
+
+## Gateway Service
+
+Port:
+
+```text
+8080
+```
+
+Technology:
+
+```text
+Spring Cloud Gateway
+Spring WebFlux
+Spring Cloud LoadBalancer
+Spring Cloud Consul
+```
+
+Responsibilities:
+
+- Provide a single external entry point
+- Route external requests to internal services
+- Resolve services through logical service identities
+- Integrate with service discovery and client-side load balancing
+- Keep edge concerns outside business services
+
+Current routes:
+
+```text
+/api/v1/cars/**
+→ catalog-service
+
+/api/v1/auctions/**
+→ auction
+```
+
+The Gateway uses logical service identities rather than hard-coded service URLs.
+
+For example:
+
+```text
+lb://catalog-service
+```
+
+is resolved through:
+
+```text
+Spring Cloud LoadBalancer
+→ Consul Discovery
+→ healthy catalog-service instance
+```
+
+The Gateway contains no auction or catalog business logic.
+
+Future edge concerns may include:
+
+- authentication
+- rate limiting
+- CORS
+- correlation IDs
+- edge-level metrics and tracing
+
+---
 
 ## Catalog Service
 
@@ -163,6 +245,18 @@ Port:
 
 ```text
 8081
+```
+
+An additional instance can be started on:
+
+```text
+8091
+```
+
+Both instances register under the logical service name:
+
+```text
+catalog-service
 ```
 
 Database:
@@ -246,6 +340,17 @@ POST /api/v1/auctions/{auctionId}/bids
 POST /api/v1/auctions/{auctionId}/close
 ```
 
+For synchronous Catalog communication, the Auction service uses:
+
+```text
+CarLookupPort
+→ CatalogHttpAdapter
+→ CatalogFeignClient
+→ Spring Cloud LoadBalancer
+→ Consul Discovery
+→ catalog-service
+```
+
 The auction service uses a rich domain model and Ports & Adapters architecture.
 
 ---
@@ -299,7 +404,8 @@ The application core does not depend on infrastructure.
 For example, `AuctionService` does not know about:
 
 - `JpaRepository`
-- `RestClient`
+- OpenFeign
+- HTTP client implementations
 - PostgreSQL
 - HTTP status codes
 - controllers
@@ -414,7 +520,13 @@ Infrastructure adapters implement them.
 
 The auction service validates a car before opening an auction.
 
-The flow is:
+The application-facing dependency remains:
+
+```text
+CarLookupPort
+```
+
+The current implementation uses OpenFeign together with service discovery and client-side load balancing.
 
 ```text
 AuctionService
@@ -426,29 +538,46 @@ CarLookupPort
 CatalogHttpAdapter
       │
       ▼
-CatalogHttpClient
+CatalogFeignClient
       │
       ▼
-@HttpExchange
+OpenFeign
       │
       ▼
-RestClient
+Spring Cloud LoadBalancer
+      │
+      ▼
+Consul Discovery
       │
       ▼
 catalog-service
 ```
 
-The project uses Spring HTTP Interfaces:
+The Feign client uses the logical service identity:
 
-```java
-@HttpExchange
+```text
+catalog-service
 ```
 
-instead of OpenFeign.
+rather than a physical URL such as:
 
-This keeps synchronous HTTP communication inside Spring Framework without introducing a Spring Cloud dependency at this stage.
+```text
+http://localhost:8081
+```
 
----
+When multiple Catalog instances are registered:
+
+```text
+catalog-service
+├── :8081
+└── :8091
+```
+
+Spring Cloud LoadBalancer selects an available instance.
+
+The original Spring HTTP Interface implementation is preserved as an architectural decision in ADR-002.
+
+That decision was later superseded by ADR-003 after Spring Cloud became an intentional platform dependency.
 
 # Remote Failure Semantics
 
@@ -631,12 +760,16 @@ Current:
 - Spring Boot 4.1
 - Spring Framework 7
 - Spring MVC
+- Spring WebFlux for Gateway
 - Spring Data JPA
 - Hibernate
 - PostgreSQL 16
 - Flyway
-- Spring HTTP Interface (`@HttpExchange`)
-- RestClient
+- Spring Cloud OpenFeign
+- Spring Cloud LoadBalancer
+- Spring Cloud Gateway
+- Spring Cloud Consul
+- Consul KV
 - Springdoc OpenAPI
 - Maven
 - Docker Compose
@@ -662,8 +795,6 @@ Planned:
 - Helm
 - GitHub Actions
 
----
-
 # Running Locally
 
 ## Requirements
@@ -678,7 +809,7 @@ The project includes Maven Wrapper scripts, so a separate Maven installation is 
 
 ---
 
-## Start Databases
+## Start Infrastructure
 
 From the repository root:
 
@@ -691,6 +822,7 @@ Expected containers:
 ```text
 catalog-db
 auction-db
+consul
 ```
 
 Check:
@@ -703,10 +835,67 @@ Ports:
 
 | Component | Port |
 |---|---:|
+| Gateway | 8080 |
 | Catalog Service | 8081 |
+| Catalog Service — second instance | 8091 |
 | Auction Service | 8082 |
+| Consul | 8500 |
 | Catalog PostgreSQL | 5433 |
 | Auction PostgreSQL | 5434 |
+
+Consul UI:
+
+```text
+http://localhost:8500
+```
+
+---
+
+## Configure Gateway Routes in Consul
+
+Gateway routes are stored in Consul KV instead of the Gateway application artifact.
+
+Open:
+
+```text
+http://localhost:8500
+```
+
+Go to:
+
+```text
+Key / Value
+```
+
+Create the following key:
+
+```text
+config/gateway/data
+```
+
+Use this YAML document as the value:
+
+```yaml
+spring:
+  cloud:
+    gateway:
+      server:
+        webflux:
+          routes:
+            - id: catalog-route
+              uri: lb://catalog-service
+              predicates:
+                - Path=/api/v1/cars/**
+
+            - id: auction-route
+              uri: lb://auction
+              predicates:
+                - Path=/api/v1/auctions/**
+```
+
+Gateway loads this configuration from Consul during startup.
+
+Runtime ConfigWatch is currently disabled, so changing this value requires restarting the Gateway.
 
 ---
 
@@ -732,6 +921,40 @@ Health:
 http://localhost:8081/actuator/health
 ```
 
+After startup, Catalog should appear in Consul as:
+
+```text
+catalog-service
+```
+
+---
+
+## Start a Second Catalog Instance
+
+A second Catalog instance can be used to experiment with service discovery and client-side load balancing.
+
+From the `catalog` directory:
+
+```powershell
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.arguments=--server.port=8091"
+```
+
+Alternatively, when running through an IDE, start another Catalog configuration with:
+
+```text
+--server.port=8091
+```
+
+Consul should then contain:
+
+```text
+catalog-service
+├── catalog-service-8081
+└── catalog-service-8091
+```
+
+Both instances use the same Catalog database during the current local-development phase.
+
 ---
 
 ## Start Auction Service
@@ -756,6 +979,65 @@ Health:
 http://localhost:8082/actuator/health
 ```
 
+After startup, Auction should appear in Consul as:
+
+```text
+auction
+```
+
+---
+
+## Start Gateway
+
+Windows:
+
+```powershell
+cd gateway
+.\mvnw.cmd spring-boot:run
+```
+
+Unix:
+
+```bash
+cd gateway
+./mvnw spring-boot:run
+```
+
+Health:
+
+```text
+http://localhost:8080/actuator/health
+```
+
+Gateway routes:
+
+```text
+http://localhost:8080/actuator/gateway/routes
+```
+
+Expected route IDs:
+
+```text
+catalog-route
+auction-route
+```
+
+After startup, Gateway should also appear in Consul as:
+
+```text
+gateway
+```
+
+The Gateway is the intended external entry point for application traffic.
+
+Application requests should normally use:
+
+```text
+http://localhost:8080
+```
+
+rather than calling the individual service ports directly.
+
 ---
 
 # Running Tests
@@ -774,25 +1056,54 @@ cd auction
 .\mvnw.cmd test
 ```
 
+Gateway:
+
+```powershell
+cd gateway
+.\mvnw.cmd test
+```
+
 The auction tests intentionally demonstrate one of the main benefits of hexagonal architecture.
 
 Domain and application behavior can be tested without:
 
-- Spring context,
-- PostgreSQL,
-- Docker,
-- or HTTP.
+- Spring context
+- PostgreSQL
+- Docker
+- HTTP
 
 Fake port implementations can replace infrastructure dependencies during unit tests.
+
+Infrastructure-oriented behavior such as service discovery, load balancing, Gateway routing, and Consul integration is currently verified through local integration experiments.
+
+Later phases will introduce stronger integration and contract testing using tools such as Testcontainers and contract-testing frameworks.
 
 ---
 
 # Example Flow
 
+The following requests use the Gateway as the external application entry point.
+
+---
+
 ## 1. List Cars
 
 ```http
-GET http://localhost:8081/api/v1/cars
+GET http://localhost:8080/api/v1/cars
+```
+
+Expected:
+
+```text
+200 OK
+```
+
+Request flow:
+
+```text
+Client
+→ Gateway
+→ catalog-service
 ```
 
 Copy one of the returned car IDs.
@@ -802,7 +1113,7 @@ Copy one of the returned car IDs.
 ## 2. Open Auction
 
 ```http
-POST http://localhost:8082/api/v1/auctions
+POST http://localhost:8080/api/v1/auctions
 Content-Type: application/json
 ```
 
@@ -812,7 +1123,7 @@ Content-Type: application/json
   "sellerId": "22222222-2222-2222-2222-222222222222",
   "startingAmount": 395000.00,
   "currency": "USD",
-  "endsAt": "2026-08-20T18:00:00Z"
+  "endsAt": "2027-08-20T18:00:00Z"
 }
 ```
 
@@ -824,12 +1135,26 @@ Expected:
 
 with a `Location` header containing the created auction ID.
 
+The complete synchronous request flow is:
+
+```text
+Client
+→ Gateway
+→ Auction
+→ CarLookupPort
+→ CatalogHttpAdapter
+→ CatalogFeignClient
+→ LoadBalancer
+→ Consul Discovery
+→ Catalog
+```
+
 ---
 
 ## 3. Place Bid
 
 ```http
-POST http://localhost:8082/api/v1/auctions/{auctionId}/bids
+POST http://localhost:8080/api/v1/auctions/{auctionId}/bids
 Content-Type: application/json
 ```
 
@@ -851,6 +1176,11 @@ Expected:
 
 ## 4. Try a Lower Bid
 
+```http
+POST http://localhost:8080/api/v1/auctions/{auctionId}/bids
+Content-Type: application/json
+```
+
 ```json
 {
   "bidderId": "44444444-4444-4444-4444-444444444444",
@@ -865,12 +1195,14 @@ Expected:
 409 Conflict
 ```
 
+The bid is rejected by the Auction domain model.
+
 ---
 
 ## 5. Close Auction
 
 ```http
-POST http://localhost:8082/api/v1/auctions/{auctionId}/close
+POST http://localhost:8080/api/v1/auctions/{auctionId}/close
 ```
 
 Expected:
@@ -879,7 +1211,7 @@ Expected:
 204 No Content
 ```
 
-Closing it again results in:
+Closing the same auction again results in:
 
 ```text
 409 Conflict
@@ -983,15 +1315,22 @@ Topics:
 
 ## Phase 03 — Platform Layer
 
-Status: **Planned**
+Status: **Completed**
 
 Topics:
 
 - API Gateway
+- Service Registry
+- Service Registration
 - Service Discovery
+- Health Checks
 - Centralized Configuration
 - Client-side Load Balancing
-- Spring Boot 4 compatibility considerations
+- Logical Service Identity
+- Multi-instance services
+- OpenFeign
+- Remote failure translation
+- Spring Boot 4 / Spring Cloud integration considerations
 
 ---
 
@@ -1230,17 +1569,20 @@ The objective is to understand **why they exist, what they cost, and when they s
 Current milestone:
 
 ```text
-Phase 02 — Auction Service
+Phase 03 — Platform Layer
 Completed
 ```
 
 Next:
 
 ```text
-Phase 03 — Platform Layer
-API Gateway
-Service Discovery
-Centralized Configuration
+Phase 04 — Event-Driven Architecture
+
+Apache Kafka
+Domain Events
+Transactional Outbox
+At-least-once delivery
+Idempotency
 ```
 
 ---
