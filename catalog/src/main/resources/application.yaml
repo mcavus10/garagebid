@@ -33,6 +33,22 @@ spring:
     problemdetails:
       enabled: true
 
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: catalog-auction-projection-v1
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+    listener:
+      ack-mode: record
+
+garagebid:
+  kafka:
+    auction-events-topic: garagebid.auction.events
+
 management:
   endpoints:
     web:
