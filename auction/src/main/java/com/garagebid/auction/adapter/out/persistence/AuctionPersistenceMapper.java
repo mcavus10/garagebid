@@ -8,38 +8,64 @@ final class AuctionPersistenceMapper {
 
     private AuctionPersistenceMapper() {}
 
-    static AuctionJpaEntity toJpa(Auction a) {
-        AuctionJpaEntity e = new AuctionJpaEntity();
-        e.setId(a.id());
-        e.setCarId(a.carId());
-        e.setSellerId(a.sellerId());
-        e.setStartingAmount(a.startingPrice().amount());
-        e.setCurrency(a.startingPrice().currency().getCurrencyCode());
-        e.setEndsAt(a.endsAt());
-        e.setStatus(a.status().name());
-        Bid bid = a.highestBid();
-        if (bid != null) {
-            e.setHighestBidderId(bid.bidderId());
-            e.setHighestAmount(bid.amount().amount());
-            e.setHighestPlacedAt(bid.placedAt());
-        }
-        return e;
+    static AuctionJpaEntity toNewJpa(Auction auction) {
+        AuctionJpaEntity entity = mapCommonFields(auction);
+        entity.setVersion(null);
+
+        return entity;
     }
 
-    static Auction toDomain(AuctionJpaEntity e) {
-        Currency currency = Currency.getInstance(e.getCurrency());
-        Money startingPrice = new Money(e.getStartingAmount(), currency);
+    static AuctionJpaEntity toJpa(Auction auction) {
+        AuctionJpaEntity entity = mapCommonFields(auction);
+        entity.setVersion(auction.version());
+        return entity;
+    }
+
+    static Auction toDomain(AuctionJpaEntity entity) {
+        Currency currency = Currency.getInstance(entity.getCurrency());
+        Money startingPrice = new Money(entity.getStartingAmount(), currency);
 
         Bid highestBid = null;
-        if (e.getHighestBidderId() != null) {
+
+        if (entity.getHighestBidderId() != null) {
             highestBid = new Bid(
-                    e.getHighestBidderId(),
-                    new Money(e.getHighestAmount(), currency),
-                    e.getHighestPlacedAt());
+                    entity.getHighestBidderId(),
+                    new Money(entity.getHighestAmount(), currency),
+                    entity.getHighestPlacedAt()
+            );
         }
 
         return Auction.rehydrate(
-                e.getId(), e.getCarId(), e.getSellerId(), startingPrice,
-                e.getEndsAt(), AuctionStatus.valueOf(e.getStatus()), highestBid);
+                entity.getId(),
+                entity.getCarId(),
+                entity.getSellerId(),
+                startingPrice,
+                entity.getEndsAt(),
+                AuctionStatus.valueOf(entity.getStatus()),
+                highestBid,
+                entity.getVersion()
+        );
+    }
+
+    private static AuctionJpaEntity mapCommonFields(Auction auction) {
+        AuctionJpaEntity entity = new AuctionJpaEntity();
+
+        entity.setId(auction.id());
+        entity.setCarId(auction.carId());
+        entity.setSellerId(auction.sellerId());
+        entity.setStartingAmount(auction.startingPrice().amount());
+        entity.setCurrency(auction.startingPrice().currency().getCurrencyCode());
+        entity.setEndsAt(auction.endsAt());
+        entity.setStatus(auction.status().name());
+
+        Bid bid = auction.highestBid();
+
+        if (bid != null) {
+            entity.setHighestBidderId(bid.bidderId());
+            entity.setHighestAmount(bid.amount().amount());
+            entity.setHighestPlacedAt(bid.placedAt());
+        }
+
+        return entity;
     }
 }

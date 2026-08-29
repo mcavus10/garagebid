@@ -1,0 +1,2 @@
+ALTER TABLE auctions
+    ADD COLUMN version BIGINT NOT NULL DEFAULT 0;

@@ -21,8 +21,10 @@ public class Auction {
 
     private final List<DomainEvent> domainEvents = new ArrayList<>();
 
+    private long version;
+
     private Auction(UUID id, UUID carId, UUID sellerId, Money startingPrice,
-                    Instant endsAt, AuctionStatus status, Bid highestBid) {
+                    Instant endsAt, AuctionStatus status, Bid highestBid, long version) {
         this.id = id;
         this.carId = carId;
         this.sellerId = sellerId;
@@ -30,6 +32,7 @@ public class Auction {
         this.endsAt = endsAt;
         this.status = status;
         this.highestBid = highestBid;
+        this.version = version;
     }
 
     public static Auction open(
@@ -48,7 +51,8 @@ public class Auction {
                 startingPrice,
                 endsAt,
                 AuctionStatus.OPEN,
-                null
+                null,
+                0L
         );
 
         auction.registerEvent(
@@ -77,8 +81,8 @@ public class Auction {
     }
 
     public static Auction rehydrate(UUID id, UUID carId, UUID sellerId, Money startingPrice,
-                                    Instant endsAt, AuctionStatus status, Bid highestBid) {
-        return new Auction(id, carId, sellerId, startingPrice, endsAt, status, highestBid);
+                                    Instant endsAt, AuctionStatus status, Bid highestBid, long version) {
+        return new Auction(id, carId, sellerId, startingPrice, endsAt, status, highestBid, version);
     }
 
 
@@ -112,6 +116,7 @@ public class Auction {
     public Instant endsAt() { return endsAt; }
     public AuctionStatus status() { return status; }
     public Bid highestBid() { return highestBid; }
+    public long version() {return version;}
 
     @Override public boolean equals(Object o) {
         return (o instanceof Auction other) && id.equals(other.id);

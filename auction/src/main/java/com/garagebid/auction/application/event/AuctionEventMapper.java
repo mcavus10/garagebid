@@ -5,7 +5,6 @@ import com.garagebid.auction.domain.event.DomainEvent;
 import com.garagebid.auction.domain.model.Money;
 import org.springframework.stereotype.Component;
 
-import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
 
