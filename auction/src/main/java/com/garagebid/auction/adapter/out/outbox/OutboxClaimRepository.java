@@ -28,8 +28,7 @@ public class OutboxClaimRepository {
     ) {
         UUID claimToken = UUID.randomUUID();
 
-        Instant claimExpiresAt =
-                now.plus(leaseDuration);
+        Instant claimExpiresAt = now.plus(leaseDuration);
 
         return jdbcTemplate.query(
                 """
