@@ -12,36 +12,51 @@ import java.nio.charset.StandardCharsets;
 @Component
 public class AuctionEventsKafkaConsumer {
 
+    private static final String AUCTION_OPENED = "auction.opened";
+    private static final int AUCTION_OPENED_VERSION = 1;
+
     private final JsonMapper jsonMapper;
-    private final AuctionOpenedEventHandler auctionOpenedHandler;
+    private final AuctionOpenedEventHandler auctionOpenedEventHandler;
 
     public AuctionEventsKafkaConsumer(
             JsonMapper jsonMapper,
-            AuctionOpenedEventHandler auctionOpenedHandler
+            AuctionOpenedEventHandler auctionOpenedEventHandler
     ) {
         this.jsonMapper = jsonMapper;
-        this.auctionOpenedHandler = auctionOpenedHandler;
+        this.auctionOpenedEventHandler = auctionOpenedEventHandler;
     }
 
     @KafkaListener(topics = "${garagebid.kafka.auction-events-topic}")
     public void consume(ConsumerRecord<String, String> record) {
         String eventType = header(record, "eventType");
 
-        if (!"auction.opened".equals(eventType)) {
+        if (!AUCTION_OPENED.equals(eventType)) {
             return;
         }
 
-        int version = Integer.parseInt(header(record, "eventVersion"));
+        int version = parseVersion(header(record, "eventVersion"));
 
-        if (version != 1) {
-            throw new IllegalArgumentException("Unsupported auction.opened version: " + version);
+        if (version != AUCTION_OPENED_VERSION) {
+            throw new NonRetryableKafkaMessageException("Unsupported auction.opened event version: " + version);
         }
 
+        AuctionOpenedMessageV1 event = deserialize(record.value());
+        auctionOpenedEventHandler.handle(event);
+    }
+
+    private AuctionOpenedMessageV1 deserialize(String payload) {
         try {
-            AuctionOpenedMessageV1 event = jsonMapper.readValue(record.value(), AuctionOpenedMessageV1.class);
-            auctionOpenedHandler.handle(event);
+            return jsonMapper.readValue(payload, AuctionOpenedMessageV1.class);
         } catch (JacksonException e) {
-            throw new IllegalArgumentException("Invalid auction.opened payload", e);
+            throw new NonRetryableKafkaMessageException("Invalid auction.opened payload", e);
+        }
+    }
+
+    private int parseVersion(String value) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            throw new NonRetryableKafkaMessageException("Invalid eventVersion header: " + value, e);
         }
     }
 
@@ -49,7 +64,7 @@ public class AuctionEventsKafkaConsumer {
         var header = record.headers().lastHeader(name);
 
         if (header == null) {
-            throw new IllegalArgumentException("Missing Kafka header: " + name);
+            throw new NonRetryableKafkaMessageException("Missing Kafka header: " + name);
         }
 
         return new String(header.value(), StandardCharsets.UTF_8);

@@ -48,6 +48,7 @@ spring:
 garagebid:
   kafka:
     auction-events-topic: garagebid.auction.events
+    auction-events-dlt-topic: garagebid.auction.events.DLT
 
 management:
   endpoints:
