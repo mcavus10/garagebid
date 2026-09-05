@@ -1,6 +1,8 @@
 package com.garagebid.auction.domain.model;
 
+import com.garagebid.auction.domain.event.AuctionClosedEvent;
 import com.garagebid.auction.domain.event.AuctionOpenedEvent;
+import com.garagebid.auction.domain.event.BidPlacedEvent;
 import com.garagebid.auction.domain.event.DomainEvent;
 
 import java.time.Instant;
@@ -87,22 +89,43 @@ public class Auction {
 
 
     public void placeBid(UUID bidderId, Money amount, Instant now) {
-        if (status != AuctionStatus.OPEN || now.isAfter(endsAt))
+        if (status != AuctionStatus.OPEN || now.isAfter(endsAt)) {
             throw new AuctionNotOpenException(id);
+        }
 
-        boolean acceptable = (highestBid == null)
+        boolean acceptable = highestBid == null
                 ? amount.isGreaterThanOrEqual(startingPrice)
                 : amount.isGreaterThan(highestBid.amount());
-        if (!acceptable)
-            throw new BidTooLowException(amount,
-                    highestBid == null ? startingPrice : highestBid.amount());
+
+        if (!acceptable) {
+            throw new BidTooLowException(
+                    amount,
+                    highestBid == null ? startingPrice : highestBid.amount()
+            );
+        }
 
         this.highestBid = new Bid(bidderId, amount, now);
+
+        registerEvent(new BidPlacedEvent(
+                id,
+                bidderId,
+                amount,
+                now
+        ));
     }
 
-    public void close() {
-        if (status != AuctionStatus.OPEN) throw new AuctionNotOpenException(id);
+    public void close(Instant now) {
+        if (status != AuctionStatus.OPEN) {
+            throw new AuctionNotOpenException(id);
+        }
+
         this.status = AuctionStatus.CLOSED;
+
+        registerEvent(new AuctionClosedEvent(
+                id,
+                highestBid,
+                now
+        ));
     }
 
     public boolean hasWinner() {

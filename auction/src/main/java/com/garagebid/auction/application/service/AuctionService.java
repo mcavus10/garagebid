@@ -5,7 +5,6 @@ import com.garagebid.auction.application.port.in.OpenAuctionUseCase;
 import com.garagebid.auction.application.port.in.PlaceBidUseCase;
 import com.garagebid.auction.application.port.out.CarLookupPort;
 import com.garagebid.auction.application.port.out.LoadAuctionPort;
-import com.garagebid.auction.application.port.out.SaveAuctionPort;
 import com.garagebid.auction.domain.model.Auction;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,19 +14,21 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Service
-public class AuctionService implements PlaceBidUseCase, CloseAuctionUseCase, OpenAuctionUseCase {
+public class AuctionService
+        implements PlaceBidUseCase, CloseAuctionUseCase, OpenAuctionUseCase {
 
     private final LoadAuctionPort loadAuctionPort;
-    private final SaveAuctionPort saveAuctionPort;
     private final CarLookupPort carLookupPort;
     private final AuctionTransactionalWriter transactionalWriter;
     private final Clock clock;
 
-    public AuctionService(LoadAuctionPort loadAuctionPort,
-                          SaveAuctionPort saveAuctionPort, CarLookupPort carLookupPort, AuctionTransactionalWriter transactionalWriter,
-                          Clock clock) {
+    public AuctionService(
+            LoadAuctionPort loadAuctionPort,
+            CarLookupPort carLookupPort,
+            AuctionTransactionalWriter transactionalWriter,
+            Clock clock
+    ) {
         this.loadAuctionPort = loadAuctionPort;
-        this.saveAuctionPort = saveAuctionPort;
         this.carLookupPort = carLookupPort;
         this.transactionalWriter = transactionalWriter;
         this.clock = clock;
@@ -39,9 +40,13 @@ public class AuctionService implements PlaceBidUseCase, CloseAuctionUseCase, Ope
         Auction auction = loadAuctionPort.loadById(command.auctionId())
                 .orElseThrow(() -> new AuctionNotFoundException(command.auctionId()));
 
-        auction.placeBid(command.bidderId(), command.amount(), Instant.now(clock));
+        auction.placeBid(
+                command.bidderId(),
+                command.amount(),
+                Instant.now(clock)
+        );
 
-        saveAuctionPort.save(auction);
+        transactionalWriter.update(auction);
     }
 
     @Override
@@ -50,14 +55,12 @@ public class AuctionService implements PlaceBidUseCase, CloseAuctionUseCase, Ope
         Auction auction = loadAuctionPort.loadById(auctionId)
                 .orElseThrow(() -> new AuctionNotFoundException(auctionId));
 
-        auction.close();
-
-        saveAuctionPort.save(auction);
+        auction.close(clock.instant());
+        transactionalWriter.update(auction);
     }
 
     @Override
     public UUID openAuction(OpenAuctionCommand command) {
-
         boolean carExists = carLookupPort.existsById(command.carId());
 
         if (!carExists) {
@@ -72,7 +75,7 @@ public class AuctionService implements PlaceBidUseCase, CloseAuctionUseCase, Ope
                 clock.instant()
         );
 
-        transactionalWriter.save(auction);
+        transactionalWriter.create(auction);
 
         return auction.id();
     }

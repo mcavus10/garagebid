@@ -1,8 +1,6 @@
 package com.garagebid.auction.application.service;
 
-import com.garagebid.auction.application.event.AuctionEventMapper;
-import com.garagebid.auction.application.event.AuctionOpenedIntegrationEvent;
-import com.garagebid.auction.application.event.IntegrationEvent;
+import com.garagebid.auction.application.event.*;
 import com.garagebid.auction.application.port.in.OpenAuctionUseCase.OpenAuctionCommand;
 import com.garagebid.auction.application.port.in.PlaceBidUseCase.PlaceBidCommand;
 import com.garagebid.auction.application.port.out.CarLookupPort;
@@ -235,26 +233,44 @@ class AuctionServiceTest {
 
         assertNotNull(savedAuction);
         assertNotNull(savedAuction.highestBid());
-
-        assertEquals(
-                BIDDER_ID,
-                savedAuction.highestBid().bidderId()
-        );
-
+        assertEquals(BIDDER_ID, savedAuction.highestBid().bidderId());
         assertEquals(
                 Money.of("400000.00", "USD"),
                 savedAuction.highestBid().amount()
         );
-
-        assertEquals(
-                NOW,
-                savedAuction.highestBid().placedAt()
-        );
+        assertEquals(NOW, savedAuction.highestBid().placedAt());
 
         assertEquals(0, persistencePort.createCount);
         assertEquals(1, persistencePort.saveCount);
 
-        assertTrue(eventPort.events.isEmpty());
+        assertEquals(1, eventPort.events.size());
+
+        IntegrationEvent integrationEvent = eventPort.events.getFirst();
+
+        assertInstanceOf(
+                AuctionBidPlacedIntegrationEvent.class,
+                integrationEvent
+        );
+
+        AuctionBidPlacedIntegrationEvent event =
+                (AuctionBidPlacedIntegrationEvent) integrationEvent;
+
+        assertNotNull(event.eventId());
+        assertEquals(auction.id(), event.aggregateId());
+        assertEquals(NOW, event.occurredAt());
+        assertEquals(BIDDER_ID, event.bidderId());
+        assertEquals(Money.of("400000.00", "USD").amount(), event.amount());
+        assertEquals("USD", event.currency());
+
+        assertEquals(
+                AuctionBidPlacedIntegrationEvent.TYPE,
+                event.eventType()
+        );
+
+        assertEquals(
+                AuctionBidPlacedIntegrationEvent.VERSION,
+                event.eventVersion()
+        );
     }
 
     @Test
@@ -318,15 +334,40 @@ class AuctionServiceTest {
         Auction savedAuction = persistencePort.lastSaved;
 
         assertNotNull(savedAuction);
-        assertEquals(
-                AuctionStatus.CLOSED,
-                savedAuction.status()
-        );
+        assertEquals(AuctionStatus.CLOSED, savedAuction.status());
 
         assertEquals(0, persistencePort.createCount);
         assertEquals(1, persistencePort.saveCount);
 
-        assertTrue(eventPort.events.isEmpty());
+        assertEquals(1, eventPort.events.size());
+
+        IntegrationEvent integrationEvent = eventPort.events.getFirst();
+
+        assertInstanceOf(
+                AuctionClosedIntegrationEvent.class,
+                integrationEvent
+        );
+
+        AuctionClosedIntegrationEvent event =
+                (AuctionClosedIntegrationEvent) integrationEvent;
+
+        assertNotNull(event.eventId());
+        assertEquals(auction.id(), event.aggregateId());
+        assertEquals(NOW, event.occurredAt());
+
+        assertNull(event.winnerId());
+        assertNull(event.winningAmount());
+        assertNull(event.currency());
+
+        assertEquals(
+                AuctionClosedIntegrationEvent.TYPE,
+                event.eventType()
+        );
+
+        assertEquals(
+                AuctionClosedIntegrationEvent.VERSION,
+                event.eventVersion()
+        );
     }
 
     @Test
@@ -386,13 +427,13 @@ class AuctionServiceTest {
         AuctionTransactionalWriter transactionalWriter =
                 new AuctionTransactionalWriter(
                         persistencePort,
+                        persistencePort,
                         eventPort,
                         eventMapper
                 );
 
         return new AuctionService(
                 loadPort,
-                persistencePort,
                 carLookupPort,
                 transactionalWriter,
                 CLOCK

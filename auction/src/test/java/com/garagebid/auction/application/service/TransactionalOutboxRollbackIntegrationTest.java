@@ -80,7 +80,7 @@ class TransactionalOutboxRollbackIntegrationTest {
 
         assertThrows(
                 IllegalStateException.class,
-                () -> transactionalWriter.save(auction)
+                () -> transactionalWriter.create(auction)
         );
 
         Integer auctionCount = jdbcTemplate.queryForObject(
